@@ -4,7 +4,6 @@ django_crypto_fields
 .pydevproject
 .env
 .etc
-etc/
 db.sqlite3
 
 

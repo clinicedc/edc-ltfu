@@ -1,33 +1,27 @@
 from dateutil.relativedelta import relativedelta
 from django.core.exceptions import ObjectDoesNotExist
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings
 from edc_action_item import site_action_items
 from edc_action_item.models import ActionItem
 from edc_adverse_event.constants import DEATH_REPORT_ACTION
 from edc_appointment.tests.appointment_test_case_mixin import AppointmentTestCaseMixin
 from edc_consent import site_consents
-from edc_constants.constants import ALIVE, CLOSED, HOSPITALIZED, NEW, OTHER, YES
+from edc_constants.constants import CLOSED, HOSPITALIZED, OTHER, YES
 from edc_facility.import_holidays import import_holidays
 from edc_list_data import load_list_data
-from edc_metadata.tests.models import (
-    SubjectConsent,
-    SubjectVisit,
-    SubjectVisitMissed,
-    SubjectVisitMissedReasons,
-)
+from edc_metadata.tests.models import SubjectConsent
 from edc_metadata.tests.visit_schedule import visit_schedule
 from edc_offstudy.action_items import EndOfStudyAction as BaseEndOfStudyAction
 from edc_reference import site_reference_configs
 from edc_unblinding.constants import UNBLINDING_REVIEW_ACTION
 from edc_utils import get_dob, get_utcnow
 from edc_visit_schedule.site_visit_schedules import site_visit_schedules
-from edc_visit_tracking.action_items import VisitMissedAction
-from edc_visit_tracking.constants import MISSED_VISIT, SCHEDULED
 
 from edc_ltfu.action_items import LtfuAction
 from edc_ltfu.constants import LTFU_ACTION
 from edc_ltfu.models import Ltfu
 
+from ...utils import get_ltfu_model_cls, get_ltfu_model_name
 from ..consents import v1_consent
 
 list_data = {
@@ -46,41 +40,14 @@ list_data = {
 
 class TestLtfu(AppointmentTestCaseMixin, TestCase):
     @classmethod
-    def setUpClass(cls):
+    def setUpTestData(cls):
         site_consents.register(v1_consent)
         import_holidays()
-        return super().setUpClass()
-
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
 
     def setUp(self):
         load_list_data(
             list_data=list_data, model_name="edc_metadata.subjectvisitmissedreasons"
         )
-        site_action_items.registry = {}
-
-        class TestLtfuAction(LtfuAction):
-            reference_model = "edc_ltfu.ltfu"
-            admin_site_name = "edc_ltfu_admin"
-
-        class SubjectVisitMissedAction(VisitMissedAction):
-            reference_model = "edc_metadata.subjectvisitmissed"
-            admin_site_name = "edc_ltfu_admin"
-
-        class EndOfStudyAction(BaseEndOfStudyAction):
-            reference_model = "edc_ltfu.offschedule"
-            admin_site_name = "edc_ltfu_admin"
-            parent_action_names = [
-                UNBLINDING_REVIEW_ACTION,
-                DEATH_REPORT_ACTION,
-                LTFU_ACTION,
-            ]
-
-        site_action_items.register(TestLtfuAction)
-        site_action_items.register(SubjectVisitMissedAction)
-        site_action_items.register(EndOfStudyAction)
 
         self.visit_schedule_name = "visit_schedule1"
         self.schedule_name = "schedule1"
@@ -121,7 +88,40 @@ class TestLtfu(AppointmentTestCaseMixin, TestCase):
             subject_identifier=self.subject_identifier, dob=dob
         )
 
+    @staticmethod
+    def register_actions():
+        site_action_items.registry = {}
+
+        class TestLtfuAction(LtfuAction):
+            pass
+
+        class EndOfStudyAction(BaseEndOfStudyAction):
+            reference_model = "edc_ltfu.offschedule"
+            admin_site_name = "edc_ltfu_admin"
+            parent_action_names = [
+                UNBLINDING_REVIEW_ACTION,
+                DEATH_REPORT_ACTION,
+                LTFU_ACTION,
+            ]
+
+        site_action_items.register(TestLtfuAction)
+        site_action_items.register(EndOfStudyAction)
+
+    @override_settings(EDC_LTFU_MODEL_NAME="edc_ltfu.ltfu")
+    def test_model_name(self):
+        self.assertEqual(get_ltfu_model_name(), "edc_ltfu.ltfu")
+
+    @override_settings(EDC_LTFU_MODEL_NAME="edc_ltfu.badboy")
+    def test_bad_model_cls(self):
+        self.assertRaises(LookupError, get_ltfu_model_cls)
+
+    @override_settings(EDC_LTFU_MODEL_NAME="edc_ltfu.ltfu")
+    def test_model_cls(self):
+        self.assertEqual(get_ltfu_model_cls(), Ltfu)
+
+    @override_settings(EDC_LTFU_MODEL_NAME="edc_ltfu.ltfu")
     def test_ltfu_creates_and_closes_action(self):
+        self.register_actions()
         Ltfu.objects.create(
             subject_identifier=self.subject_identifier,
             last_seen_datetime=get_utcnow(),
@@ -134,41 +134,6 @@ class TestLtfu(AppointmentTestCaseMixin, TestCase):
                 subject_identifier=self.subject_identifier,
                 action_type__name=LTFU_ACTION,
                 status=CLOSED,
-            )
-        except ObjectDoesNotExist:
-            self.fail("ObjectDoesNotExist unexpectedly raised")
-
-    def test_missed_visit_creates_new_ltfu_action(self):
-        appointment = self.get_appointment(
-            subject_identifier=self.subject_identifier,
-            visit_code="1000",
-            visit_code_sequence=0,
-            reason=SCHEDULED,
-            appt_datetime=get_utcnow(),
-        )
-
-        subject_visit = SubjectVisit.objects.create(
-            appointment=appointment,
-            report_datetime=appointment.appt_datetime,
-            reason=MISSED_VISIT,
-        )
-
-        obj = SubjectVisitMissed.objects.create(
-            subject_visit=subject_visit,
-            report_datetime=subject_visit.report_datetime,
-            survival_status=ALIVE,
-            contact_attempted=YES,
-            contact_attempts_count=1,
-            contact_made=YES,
-            contact_last_date=get_utcnow(),
-            ltfu=YES,
-        )
-        obj.missed_reasons.add(SubjectVisitMissedReasons.objects.get(name=HOSPITALIZED))
-        try:
-            ActionItem.objects.get(
-                subject_identifier=self.subject_identifier,
-                action_type__name=LTFU_ACTION,
-                status=NEW,
             )
         except ObjectDoesNotExist:
             self.fail("ObjectDoesNotExist unexpectedly raised")

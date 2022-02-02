@@ -1,6 +1,6 @@
 |pypi| |actions| |codecov| |downloads|
 
-edc-lftu
+edc-ltfu
 --------
 
 Base classes for participant loss to follow up form and processes

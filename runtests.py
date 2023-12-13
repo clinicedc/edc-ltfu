@@ -20,6 +20,8 @@ DEFAULT_SETTINGS = DefaultTestSettings(
     SUBJECT_CONSENT_MODEL="edc_metadata.subjectconsent",
     SUBJECT_VISIT_MODEL="edc_visit_tracking.subjectvisit",
     SUBJECT_VISIT_MISSED_MODEL="edc_metadata.subjectvisitmissed",
+    EDC_SITES_REGISTER_DEFAULT=True,
+    EDC_LTFU_MODEL_NAME="edc_ltfu.ltfu",
     INSTALLED_APPS=[
         "django.contrib.admin",
         "django.contrib.auth",
